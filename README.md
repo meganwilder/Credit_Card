@@ -66,7 +66,7 @@ It appears that using h of 20 resulted in a reasonable model.  It clustered the 
 ![](figs/Picture6.png)
 
 ## Anomalies
-
+![](figs/Picture8.png)
 
 ## Business Insight
 Agency transactions that occurred within the merchant category listed in the fraud data frame could possibly be fraud based on my MeanShift analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
@@ -84,6 +84,7 @@ Hidden layers: 5, 2, 5 and 10, 2, 10
 Epochs: 50, 100, 200  
 
 ## Anomalies
+![](figs/Picture7.png)
 
 ## Business Insight
 Agency transactions that occurred within the merchant category listed in the table above could possibly be fraud based on my Autoencoder analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
