@@ -15,6 +15,7 @@ This dataset is comprised of 442,458 observations and 11 columns. The variables 
 - Transaction Date
 - Posted Date
 - Merchant Category Code (MCC)
+![](figs/Picture1.png)
 # Feature Creation
 ## Monetary Feature
 Add: Max, Average and Median Amount Ratio Features by Agency Name and Merchant Category
