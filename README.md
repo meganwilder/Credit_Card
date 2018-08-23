@@ -44,9 +44,10 @@ It appears that using eps of 15 and MinPts of 50 resulted in a reasonable model.
 ![](figs/Picture4.png)
 
 ## Anomalies
+![](figs/Picture5.png)
 
 ## Business Insight
-Agency transactions that occurred within the merchant category listed in the fraud data frame could possibly be fraud based on my DBSCAN analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
+Agency transactions that occurred within the merchant category listed in the above table could possibly be fraud based on my DBSCAN analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
 
 
 # MeanShift Modeling Technique
