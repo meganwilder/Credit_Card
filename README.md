@@ -155,6 +155,8 @@ F1: 0.786
 
 I used the above metrics to determine my model’s performance. As my dataset was imbalanced I primarily used Precision, Recall and the F-score to evaluate my model performance. All of which indicate that the model is good.
 
+## Performance Metrics
+
 ![](figs/Picture9.png)
 
 ![](figs/Picture10.png)
@@ -191,12 +193,16 @@ The above three hyperparameters control the early stopping when the AUC does not
 
 Grid Search: I used H2o's grid search to train and validate numerous models at once based on different hyper-parameter levels.
 
+## Performance Metrics
 ![](figs/Picture11.png)
 
+You can see my ROC and precision recall curves below.  ROC isn’t very useful for imbalanced data as it doesn’t reflect the minority class well.  Instead the precision-recall curve is a better to highlight differences between models for imbalanced data sets as precision is directly influenced by class imbalance. 
 ![](figs/Picture12.png)
 
 ![](figs/Picture13.png)
 
+In the variable importance graph below, the top variables contribute more to the model than the bottom ones. Here, V14 and V10 are the two most significant variables. Too many variables can result in overfitting.  In order to mitigate overfitting I could reduce the number of variables used to only the most important variables.
 ![](figs/Picture14.png)
 
+Partial dependence plots gives a graphical depiction of the marginal effect of a variable on the response (fraud in our case).  For the most important variable, V14, the probability of fraud is highest from negative 20 to about negative 5 then decreases rapidly as V14 approaches 0.  
 ![](figs/Picture15.png)
