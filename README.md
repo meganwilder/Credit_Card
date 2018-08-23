@@ -63,7 +63,7 @@ I analyzed h values of: 10, 20, 30, 50 and 75.
 
 ## Best Model with hyperparameter of h=20
 It appears that using h of 20 resulted in a reasonable model.  It clustered the data points into 1 primary cluster with 22 anomalies.
-
+![](figs/Picture6.png)
 ## Anomalies
 
 ## Business Insight
