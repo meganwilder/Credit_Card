@@ -84,7 +84,7 @@ Epochs: 50, 100, 200
 ## Anomalies
 
 ## Business Insight
-Agency transactions that occurred within the merchant category listed in the fraud_auto data frame could possibly be fraud based on my Autoencoder analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
+Agency transactions that occurred within the merchant category listed in the table above could possibly be fraud based on my Autoencoder analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
 
 Of the five agency transactions flagged as possible anomalies using Autoencoder, all but one was also flagged with my MeanShift model.  The one data point that was flagged by Autoencoder but not MeanShift was the Holiday Inns category of the Department of Agriculture. 
 
