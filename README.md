@@ -190,3 +190,13 @@ stopping_metric = "AUC",
 The above three hyperparameters control the early stopping when the AUC does not improve by at least 0.01% for 5 consecutive scoring events.  
 
 Grid Search: I used H2o's grid search to train and validate numerous models at once based on different hyper-parameter levels.
+
+![](figs/Picture11.png)
+
+![](figs/Picture12.png)
+
+![](figs/Picture13.png)
+
+![](figs/Picture14.png)
+
+![](figs/Picture15.png)
