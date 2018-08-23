@@ -160,3 +160,33 @@ I used the above metrics to determine my model’s performance. As my dataset wa
 ![](figs/Picture10.png)
 
 In a business use case a credit card company would prefer more false positives than false negatives. That is the company would rather incorrectly identify a transaction as fraud than identify a fraudulent transaction as legitimate. Therefore, for my performance metrics I preferred high Recall, which is a low false negative rate rather than high Precision, which is a low false positive rate.
+
+
+# GBM Modeling Technique
+## GBM Method
+A gradient boosting machine computes a sequence of weak learners (typically very simple trees), where each successive tree is built for the prediction residuals of the preceding tree. It is an ensemble method, which combines several base models to produce one optimal predictive model. The combined estimator is usually better than any of the single base estimators as its bias is reduced.
+
+## GBM Model
+Learning rate (shrinkage): A value between 0 and 1, corresponds to how quickly the error is corrected from each tree to the next. A lower learning rate is generally better, but will require more trees (and computational time). A large learning rate makes the system unable to settle down.  
+
+Learn rate annealing: hyperparameter to decay the learning rate. Speeds up convergence without sacrificing too much accuracy. Max Depth: The maximum allowed depth for the trees. Deeper trees take longer to train.  
+
+Sample Rate: Row sampling rate, can improve generalization and lead to lower validation and test set errors. Rule of thumb for large datasets is around 0.7 to 0.8 (sampling 70-80% of the data).  
+
+Column Sample Rate: Column sampling rate, can improve generalization and lead to lower validation and test set errors. Rule of thumb for large datasets is around 0.7 to 0.8 (sampling 70-80% of the data).  
+
+Number of trees: # of trees used  
+
+score_tree_interval = 10: Score every 10 trees to make early stopping reproducible.  
+
+max_runtime_secs=1200: Early stopping based on timeout. In this case no more than 1200 seconds.  
+
+stopping_rounds = 5,  
+ 
+stopping_tolerance = 1e-4,  
+
+stopping_metric = "AUC",  
+
+The above three hyperparameters control the early stopping when the AUC does not improve by at least 0.01% for 5 consecutive scoring events.  
+
+Grid Search: I used H2o's grid search to train and validate numerous models at once based on different hyper-parameter levels.
