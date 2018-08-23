@@ -17,3 +17,4 @@ This dataset is comprised of 442,458 observations and 11 columns. The variables 
 - Merchant Category Code (MCC)
 # Feature Creation
 ## Monetary Feature
+Add: Max, Average and Median Amount Ratio Features by Agency Name and Merchant Category
