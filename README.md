@@ -19,11 +19,7 @@ This dataset is comprised of 442,458 observations and 11 columns. The variables 
 # Feature Creation
 ## Monetary Feature
 Add: Max, Average and Median Amount Ratio Features by Agency Name and Merchant Category
-
-| First Header  | Second Header |
-| ------------- | ------------- |
-| Content Cell  | Content Cell  |
-| Content Cell  | Content Cell  |
+![](figs/Picture2.png)
 
 ## Recency Feature
 Recency(time since last transaction)
