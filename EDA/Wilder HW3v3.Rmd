@@ -1,0 +1,268 @@
+---
+title: "APAN5420 --- HW 3"
+author: 'Megan Wilder'
+date: "6/11/18"
+output:
+  pdf_document: 
+    number_sections: yes
+    toc: yes
+    toc_depth: 1
+  html_document: 
+    df_print: default
+    number_sections: yes
+    toc: no
+    toc_depth: 1
+---
+
+-----
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+#Load Data
+```{r}
+#load packages
+library(dplyr)
+library(DataExplorer)
+library(ggplot2)
+library(plotly)
+library(xts)
+library(zoo)
+
+#load data
+ccard <- read.csv("res_purchase_card.csv")
+
+```
+
+#Explore the DataFrame
+```{r}
+#explore data
+dim(ccard)
+summary(ccard)
+colnames(ccard)
+
+#change col names
+colnames(ccard) <-
+c(
+'Year_Month',
+'Agency_Number',
+'Agency_Name',
+'Cardholder_Last_Name',
+'Cardholder_First_Initial',
+'Description',
+'Amount',
+'Vendor',
+'Transaction_Date',
+'Posted_Date',
+'Merchant_Category'
+)
+
+colnames(ccard)
+
+#number of rows
+nrow(ccard)
+
+# Count of agencies
+# Spent by agency
+# Count by merchant.Category.Code
+# Simple Bar Plot
+
+#Create new DF grouped by Agency Name with summary statistics, arrange in descending order by amount
+stat_by_agency <- ccard %>% group_by(Agency_Name) %>%
+summarise(
+count = n(),
+amount = sum(Amount),
+mean = mean(Amount),
+min = min(Amount),
+max = max(Amount)
+) %>%
+arrange(desc(amount)) %>% ungroup()
+
+#add number to beginning of Agency name enabling ranking based on amount, add percent column
+stat_by_agency <- stat_by_agency %>%
+mutate(
+row = rep(1:nrow(stat_by_agency)),
+Agency_Name_ind = paste(row, Agency_Name, sep = "_"),
+percent = amount / sum(amount)
+) %>%
+select(Agency_Name_ind, count, amount, percent, mean, min, max)
+
+head(stat_by_agency)
+
+#create df with top 30 agencies ranked by amount
+df_30 <- stat_by_agency[1:30, ]
+#plot
+barplot(
+df_30$count,
+names.arg = df_30$Agency_Name_ind,
+main = "Amount by agency name",
+las = 2
+)
+
+```
+  
+#Feature Creation  
+
+##Recency  
+
+Lead: I'm going to calculate the time since last transaction across all transactions for each Agency and time since last transaction for each Agency at a particular merchant category.  
+
+```{r}
+#create new DF group by agency, with Recency column (time since last transaction)
+time_by_agency <- ccard %>% group_by(Agency_Name) %>%
+mutate(Transaction_Date = as.Date(Transaction_Date, format = "%m/%d/%Y %H:%M")) %>%
+arrange(Agency_Name, Transaction_Date) %>%
+mutate(Recency = Transaction_Date - lag(Transaction_Date))
+
+time_by_agency[, c("Agency_Number", "Agency_Name", "Transaction_Date", "Recency")]
+
+#filter to make sure first recency for each agency is NA
+time_by_agency %>% filter(Agency_Number == 4000) %>% group_by(Vendor, Merchant_Category)
+
+
+#create new DF grouped by agencies and by Merchant_Category, 
+#with Recency column (time since last transaction)
+time_by_Merchant_Category <-
+ccard %>% group_by(Agency_Name, Merchant_Category) %>%
+mutate(Transaction_Date = as.Date(Transaction_Date, format = "%m/%d/%Y %H:%M")) %>%
+arrange(Agency_Name, Merchant_Category, Transaction_Date) %>%
+mutate(Recency = Transaction_Date - lag(Transaction_Date))
+
+head(time_by_Merchant_Category[, c("Agency_Number",
+"Agency_Name",
+"Merchant_Category",
+"Transaction_Date",
+"Recency")])
+
+#sort by recency
+Recency_cat_sorted <-
+time_by_Merchant_Category %>% arrange(Merchant_Category, Recency) %>% na.omit
+
+#filter OKLA. PANHANDLE STATE UNIV.
+Recency_cat_OKLA <-
+Recency_cat_sorted  %>% filter(Agency_Name == "OKLA. PANHANDLE STATE UNIV.")
+Recency_cat_OKLA <-
+Recency_cat_OKLA %>% arrange(Recency) %>% na.omit
+OKLA_head <- head(Recency_cat_OKLA)
+OKLA_tail <- tail(Recency_cat_OKLA)
+#ACCOUNTING,AUDITING AND BOOKKEEPING SERVICES had the greatest recency
+#AMUSEMENT PRKS,CIRCUSES,CARNIVLS,AND FORTUNE TELLERS 
+#had the greatest amount of time between transactions
+
+
+```
+  
+Analysis: Recency represents the time since the previous transaction. For example at OKLA Panhandle State University, the time between accounting and bookkeeping services charges was small, indicating that these are typical transactions for the university, which seems logical.  In contrast, the time between charges at amusement parks was significant, 351 days, as this is not a typical charge.
+
+Conclusion: Going forward, this variable can be used to see if future credit transactions fit the normal customer profile.  
+  
+  
+## Monetary  
+
+Lead: I'm going to aggregate data into the past 3, 7 and 30 transactions grouped by Agency.  I'm then going to calculate the average, sum and max amount for these aggregated transactions.  
+
+```{r}
+#Aggregrate data into past 3, 7 and 30 transactions by Agency
+#create sum function
+rollag <- function(x, i) {
+lagsum = 0
+for (u in 1:i) {
+lagsum = lagsum + lag(x, u)
+}
+lagsum
+}
+
+#create avg function
+rollave <- function(x, i) {
+lagsum = 0
+for (u in 1:i) {
+lagsum = lagsum + lag(x, u)
+lagave = lagsum / i
+}
+lagave
+}
+
+
+#create new DF group by agency, with lagged sum amount, 
+#average amount and max amount for past 3 transactions, 
+#7 transactions and 30 transacitons
+time_by_agency_lag <- time_by_agency %>% group_by(Agency_Name) %>%
+arrange(Agency_Name, Transaction_Date) %>%
+mutate(
+Last3sum = rollag(Amount, 3),
+Last7sum = rollag(Amount, 7),
+Last30sum = rollag(Amount, 30)
+) %>%
+mutate(
+Last3ave = rollave(Amount, 3),
+Last7ave = rollave(Amount, 7),
+Last30ave = rollave(Amount, 30)
+)  %>%
+mutate(
+Last3max = rollapplyr(Amount, 3, max, partial = TRUE),
+Last7max = rollapplyr(Amount, 7, max, partial = TRUE),
+Last30max = rollapplyr(Amount, 30, max, partial = TRUE)
+)
+
+#filter to make sure first lag for each agency is NA or first transaction for max
+time_by_agency_lag %>% filter(Agency_Number == 4000) %>% group_by(Vendor, Merchant_Category)
+
+#filter by 3 transaction average to find findings
+time_sorted_3ave <-
+time_by_agency_lag %>% arrange(desc(Last3ave)) %>% na.omit
+#filter UNIV. OF OKLA. HEALTH SCIENCES CENTER
+time_sorted_OKHS_avg <-
+time_sorted_3ave  %>% filter(Agency_Name == "UNIV. OF OKLA. HEALTH SCIENCES CENTER")
+OKHS_avg_head <-
+head(time_sorted_OKHS_avg) #largest 3 transaction average was $634,751.0
+# compare to avg and max of all transactions at UNIV. OF OKLA. HEALTH SCIENCES CENTER
+OKHS <-
+stat_by_agency  %>% filter(Agency_Name_ind == "3_UNIV. OF OKLA. HEALTH SCIENCES CENTER") 
+#average transaction size is $421.0916
+
+#filter by 3 transaction max to find findings
+time_sorted_3max <-
+time_by_agency_lag %>% arrange(desc(Last3max)) %>% na.omit
+#filter UNIV. OF OKLA. HEALTH SCIENCES CENTER
+time_sorted_OKHS_max <-
+time_sorted_3max  %>% filter(Agency_Name == "UNIV. OF OKLA. HEALTH SCIENCES CENTER")
+OKHS_max_head <-
+head(time_sorted_OKHS_max) #max out of rolling 3 transactions was $1,903,858
+
+```
+  
+Analysis: Monetary value is the amount spent on a credit transaction. For example at OKLA Health Sciences Center, the largest 3 transaction average was \$634,751.  This is compared to the average transaction size of \$421.0916 for the organization.
+
+Conclusion: As V. Van Vlasselaer et al. found in their study "Decision Support Systems", the contrast between current and past purchasing patterns enable a model to correctly estimate fraud. Going forward, this variable can be used to see if future credit transactions fit the normal customer profile. 
+  
+  
+##Frequency  
+
+Lead: I'm going to aggregate data into 1 day time periods and count the number of transactions. I subset the data for Oklahoma State University but this analysis can be applied to all Agencies in the data set.
+```{r}
+#subset OKLAHOMA STATE UNIVERSITY
+OSU_freq <-
+time_by_agency  %>% filter(Agency_Name == "OKLAHOMA STATE UNIVERSITY")  %>% arrange(Transaction_Date)
+
+#convert DF to XTS
+OSU_xts <-
+xts(OSU_freq,
+as.POSIXct(OSU_freq$Transaction_Date, format = "%m/%d/%Y"))
+
+# count the number of observations each day
+tdd <- apply.daily(OSU_xts$Transaction_Date, length)
+
+#convert to DF
+OSU_df <- as.data.frame(tdd)
+
+#change col names
+colnames(OSU_df) <-
+c('Daily_Count')
+
+summary(OSU_df)
+```
+Analysis: Frequency is the number of transactions over a certain time period.  For Oklahoma State University, the max number of transactions in one day is 568 and the average is 380. 
+
+Conclusion: Again this can be used to evaluate fraud by contrasting current and past purchasing behavior. Going forward, this variable can be used to see if future credit transactions fit the normal customer profile. 
+
