@@ -55,7 +55,8 @@ Agency transactions that occurred within the merchant category listed in the abo
 The mean shift algorithm is a non parametric clustering technique. It can handle clusters of various shapes and sizes and prior knowledge of the number of clusters is not required. For each data point, mean shift defines a window around it and computes the mean of the data point. It then shifts the center of the window towards the mean and repeats the algorithm until it converges. For fraud analysis, data points far from the centroids can be ignored by the clustering process and flagged as anomalies. These anomaly points could be possible fraudulent transactions.
 
 ## MeanShift Model
-Hyperparameter tuned include:
+Hyperparameter tuned include:  
+
 h: a positive bandwidth parameter. Larger values of h produce few and large clusters. Smaller values of h produce many small clusters. 
 
 I analyzed h values of: 10, 20, 30, 50 and 75.
