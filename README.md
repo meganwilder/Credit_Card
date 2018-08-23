@@ -77,9 +77,11 @@ Grand River Dam Auth had the highest number of merchant categories, 4, that migh
 Autoencoder is an unsupervised, neural network algorithm that uses backpropagation, setting the target values equal to the inputs. Autoencoders compress the input into a latent-space representation, and then reconstructs the output from this representation. It is typically used for dimension reduction. 
 
 ## Autoencoder Model
-Hyperparameters tuned:
-Hidden layers: 5, 2, 5 and 10, 2, 10
-Epochs: 50, 100, 200
+Hyperparameters tuned:  
+
+Hidden layers: 5, 2, 5 and 10, 2, 10  
+
+Epochs: 50, 100, 200  
 
 ## Anomalies
 
