@@ -64,7 +64,9 @@ I analyzed h values of: 10, 20, 30, 50 and 75.
 ## Best Model with hyperparameter of h=20
 It appears that using h of 20 resulted in a reasonable model.  It clustered the data points into 1 primary cluster with 22 anomalies.
 ![](figs/Picture6.png)
+
 ## Anomalies
+![](figs/Picture7.png)
 
 ## Business Insight
 Agency transactions that occurred within the merchant category listed in the fraud data frame could possibly be fraud based on my MeanShift analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
