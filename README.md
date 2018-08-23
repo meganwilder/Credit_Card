@@ -92,3 +92,50 @@ Agency transactions that occurred within the merchant category listed in the tab
 Of the five agency transactions flagged as possible anomalies using Autoencoder, all but one was also flagged with my MeanShift model.  The one data point that was flagged by Autoencoder but not MeanShift was the Holiday Inns category of the Department of Agriculture. 
 
 Overall, I found using Autoencoder more challenging for anomaly detection than MeanShift as the model did not cluster data points. 
+
+# Random Forest Modeling Technique
+## Random Forest Method
+The random forest classifier is a supervised learning technique. The model creates a set of decision trees from randomly selected subsets of the training set, it then aggregates the votes from different decision trees to decide the final class of the test object 
+
+## Randomg Forest Model
+Hyperparameters tuned include:  
+
+ntrees = Number of trees. I used 200, 500, 1000, 1500, 2000.  
+
+max_depth = Maximum tree depth. I used 5, 10, 15, 20, 25, 30.  
+
+Grid Search: I used H2o's grid search to train and validate numerous models at once based on different hyper-parameter levels.
+
+Performance Metrics: In order to evaluate the performance of a model on a given data set, it is necessary to measure how well the model's predictions actually match the observed data.
+
+MSE = Mean squared error, it measures the square of the errors. The MSE will be small if the predicted responses are very close to the true responses, and it will be large if the predicted and true responses differ substantially. MSE is vulnerable to outliers and is in a different scale than the measured units. Used in regression (continuous output).
+
+RMSE = Root mean squared error. It is the square root of the average of squared differences between prediction and actual observation (MSE). Lower values are better. It is scale dependent, therefore if the scales of the dependent variables differ across models, you can't compare RMSEs. Used in regression (continuous output).
+
+Log Loss = Logarithmic loss measures the performance of a classification model where the prediction input is a probability value between 0 and 1. Lower values are better. "Log Loss takes into account the uncertainty of your prediction based on how much it varies from the actual label. This gives us a more nuanced view into the performance of our model."
+
+AUC = The overall performance of a classifier, summarized over all possible thresholds, is given by the area under the (ROC) curve (AUC). It is used in classification analysis to determine which model predicted the classes best. It is typically used with binary classification. Not very useful for imbalanced data as it doesn’t place more emphasis on one class over the other (i.e. it does not reflect the minority class well).
+
+Gini = The Gini coefficient can be used to evaluate the performance of a classifier. It is the ratio between area between the ROC curve and the diagonal line and the area of the above triangle (Gini = 2*AUC – 1). Gini above 60% is viewed as a good model.
+
+Precision = Measures that fraction of examples classified as positive that are truly positive (i.e. when the model predicts positive, how often is it correct?)
+
+Recall = True positive rate (i.e. when it's actually positive, how often does it predict positive?).
+
+F1 = Measure of a model's accuracy. It's the harmonic average of precision and recall, where an F1 score reaches its best value at 1 (perfect precision and recall) and worst at 0.
+
+Down-Sampling for the Majority Class: Fraud transactions (the positive class) represent 0.173% of the data set, resulting in a highly imbalanced data set. Were I to run my model on the data set as is, it would bias the prediction model towards the more common non-fraudulent class. It is therefore necessary to balance the data set. I choose to use down-sampling, which creates a more balanced data set by selecting a random sample from the majority class. After down-sampling, fraud transactions represent 10% of the training data set.
+
+Results: Out of all the models with varying number of trees and maximum tree depths, I choose the model with the highest AUC on the validation set as the best model. This model used 50 trees and had a max depth of 15. I then evaluated the model performance on my test set.
+
+The test set performance metrics at the threshold that maximizes the F-statistic:
+LogLoss: 0.02584733
+AUC: 0.9709288
+Gini: 0.9418577
+Precision: 0.762
+Recall: 0.811
+F1: 0.786
+
+I used the above metrics to determine my model’s performance. As my dataset was imbalanced I primarily used Precision, Recall and the F-score to evaluate my model performance. All of which indicate that the model is good.
+
+In a business use case a credit card company would prefer more false positives than false negatives. That is the company would rather incorrectly identify a transaction as fraud than identify a fraudulent transaction as legitimate. Therefore, for my performance metrics I preferred high Recall, which is a low false negative rate rather than high Precision, which is a low false positive rate.
