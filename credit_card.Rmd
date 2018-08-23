@@ -1,0 +1,1613 @@
+---
+title: "Credit-Card-Anomaly-Detection"
+author: "Megan Wilder"
+date: "8/22/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+# Dataset
+## Oklahoma Purchase Credit Card Transactions
+The Office of Management and Enterprise Services in the State of Oklahoma has made its [purchase credit card transactions](https://catalog.data.gov/dataset/purchase-card-pcard-fiscal-year-2014) available. This dataset contains information on purchases made through the purchase card programs administered by the state and higher education institutions. 
+
+#Load Data
+```{r}
+library(dplyr)
+library(DataExplorer)
+library(ggplot2)
+library(plotly)
+library(kableExtra)
+library(reshape2)
+
+#load data
+ccard <- read.csv("res_purchase_card.csv")
+
+```
+
+#Explore the DataFrame
+```{r}
+#explore data
+dim(ccard)
+summary(ccard)
+colnames(ccard)
+nrow(ccard)
+
+#change column names
+colnames(ccard) <-
+c(
+'Year_Month',
+'Agency_Number',
+'Agency_Name',
+'Cardholder_Last_Name',
+'Cardholder_First_Initial',
+'Description',
+'Amount',
+'Vendor',
+'Transaction_Date',
+'Posted_Date',
+'Merchant_Category'
+)
+
+#view head of ccard
+kable(head(ccard)) %>% kable_styling(latex_options = "scale_down")
+
+#view count for each month
+kable(table(ccard$Year_Month)) 
+```
+
+#Feature Creation
+##Monetary Feature
+```{r}
+#Add Monetary feature
+#Add Max, Average and Median Amount Ratio Features by agency_name and merchant category
+avg_agency <- ccard %>% group_by(Agency_Name, Merchant_Category) %>%
+summarise(
+mean_category_amount = mean(Amount),
+median_category_amount = median(Amount),
+mean_count_trans = n()
+)
+#view head of avg_agency
+kable(head(avg_agency)) %>% kable_styling(latex_options = "scale_down")
+
+# Append the max, average and median statistics back to the data to derive the ratios.
+# Select the most recent 4 transactions
+per_agency_category <-
+ccard %>% group_by(Agency_Name, Merchant_Category, Year_Month) %>%
+summarise(
+max_amount = max(Amount),
+mean_amount = mean(Amount),
+median_amount = median(Amount),
+count_trans = n()
+) %>%
+left_join(avg_agency, by = c('Agency_Name', 'Merchant_Category')) %>%
+mutate(
+max_amount_ratio = max_amount / mean_category_amount,
+mean_amount_ratio = mean_amount / mean_category_amount,
+median_amount_ratio = median_amount / median_category_amount,
+mean_count_ratio  = count_trans / mean_count_trans
+) %>%
+select(
+-mean_category_amount,
+-median_category_amount,
+-mean_count_trans,-max_amount,
+-mean_amount,
+-median_amount,
+-count_trans
+) %>%
+top_n(-4)  # Use top_n(xx) to select the top xx rows, and top_n(-xx) for the bottom xx rows
+
+#summary
+summary(per_agency_category)
+
+#some category summations equaled zero, resulted in INF ratio outputs, remove
+per_agency_category <-
+per_agency_category[is.finite(per_agency_category$max_amount_ratio),]
+
+#view head of per_agency_category
+kable(head(per_agency_category)) %>% kable_styling(latex_options = "scale_down")
+
+#create new DF, add Max to year_month column
+max_per_agency_category <- per_agency_category %>%
+mutate(Year_Month = paste("Max", Year_Month, sep = "_")) %>%
+select(-mean_amount_ratio,-mean_count_ratio,-median_amount_ratio)
+
+#view head of max_per_agency_category
+kable(head(max_per_agency_category)) %>% kable_styling(latex_options = "scale_down")
+
+#create new DF, add Med to year_month column
+med_per_agency_category <- per_agency_category %>%
+mutate(Year_Month = paste("Med", Year_Month, sep = "_")) %>%
+select(-mean_amount_ratio,-mean_count_ratio,-max_amount_ratio)
+
+#view head of med_per_agency_category
+kable(head(med_per_agency_category)) %>% kable_styling(latex_options = "scale_down")
+
+#create new DF, add Mean to year_month column
+mean_per_agency_category <- per_agency_category %>%
+mutate(Year_Month = paste("Mean", Year_Month, sep = "_")) %>%
+select(-max_amount_ratio,-mean_count_ratio,-median_amount_ratio)
+
+#view head of mean_per_agency_category
+kable(head(mean_per_agency_category)) %>% kable_styling(latex_options = "scale_down")
+
+# Max variable: Use "dcast" in Library "reshape2" to organize the data so each row 
+#is a merchant category of an agent.
+max_wide <-
+dcast(max_per_agency_category,
+Agency_Name + Merchant_Category ~ Year_Month)
+max_wide = as.matrix(max_wide)
+max_wide[is.na(max_wide)] <- 0
+max_wide = as.data.frame(max_wide)
+#view head
+kable(head(max_wide)) %>% kable_styling(latex_options = "scale_down")
+
+# Median variable: Use "dcast" in Library "reshape2" to organize the data so each 
+#row is a merchant category of an agent.
+med_wide <-
+dcast(med_per_agency_category,
+Agency_Name + Merchant_Category ~ Year_Month)
+med_wide = as.matrix(med_wide)
+med_wide[is.na(med_wide)] <- 0
+med_wide = as.data.frame(med_wide)
+#view head
+kable(head(med_wide)) %>% kable_styling(latex_options = "scale_down")
+
+# Mean variable: Use "dcast" in Library "reshape2" to organize the data so each 
+#row is a merchant category of an agent.
+mean_wide <-
+dcast(mean_per_agency_category,
+Agency_Name + Merchant_Category ~ Year_Month)
+mean_wide = as.matrix(mean_wide)
+mean_wide[is.na(mean_wide)] <- 0
+mean_wide = as.data.frame(mean_wide)
+#view head
+kable(head(mean_wide)) %>% kable_styling(latex_options = "scale_down")
+
+#merge dataframes
+model_df_amt <-
+left_join(max_wide, mean_wide, by = c('Agency_Name', 'Merchant_Category'))
+model_df_amt <-
+merge(model_df_amt,
+med_wide,
+by = c("Agency_Name", "Merchant_Category"))
+```
+
+
+##Recency Feature
+```{r}
+#Add Recency feature (time since last transaction) by agency_name and merchant category
+#Add Max, Average and Median Recency Ratio Features by agency_name and merchant category
+#create new DF grouped by agencies and by Merchant_Category,
+#with Recency column
+time_by_Merchant_Category <-
+ccard %>% group_by(Agency_Name, Merchant_Category) %>%
+mutate(Transaction_Date = as.Date(Transaction_Date, format = "%m/%d/%Y %H:%M")) %>%
+arrange(Agency_Name, Merchant_Category, Transaction_Date) %>%
+mutate(Recency = Transaction_Date - lag(Transaction_Date))
+
+#view head of time_by_Merchant_Category
+kable(head(time_by_Merchant_Category[, c("Agency_Number",
+"Agency_Name",
+"Merchant_Category",
+"Transaction_Date",
+"Recency")])) %>% kable_styling(latex_options = "scale_down")
+
+#sort by recency
+Recency_cat_sorted <-
+time_by_Merchant_Category %>% arrange(Merchant_Category, Recency) %>% na.omit
+
+#Calculate the average and median recency by agency_name and merchant category
+avg_recency <-
+Recency_cat_sorted %>% group_by(Agency_Name, Merchant_Category) %>%
+summarise(
+mean_recency_amount = mean(Recency),
+median_recency_amount = median(Recency),
+mean_count_recency = n()
+)
+#view head of avg_recency
+kable(head(avg_recency)) %>% kable_styling(latex_options = "scale_down")
+
+# Append the average and median recency statistics back to the data to derive the ratios.
+# Select the most recent 4 transactions
+per_agency_category_rec <-
+Recency_cat_sorted %>% group_by(Agency_Name, Merchant_Category, Year_Month) %>%
+summarise(
+max_rec = max(Recency),
+mean_rec = mean(Recency),
+median_rec = median(Recency),
+count_rec = n()
+)
+
+per_agency_category_rec <-
+left_join(per_agency_category_rec,
+avg_recency,
+by = c('Agency_Name', 'Merchant_Category'))
+
+#view class
+lapply(per_agency_category_rec, class)
+
+#change all difftime columns to class numeric
+per_agency_category_rec$max_rec <-
+as.numeric(per_agency_category_rec$max_rec, units = "days")
+
+per_agency_category_rec$mean_rec <-
+as.numeric(per_agency_category_rec$mean_rec, units = "days")
+
+per_agency_category_rec$median_rec <-
+as.numeric(per_agency_category_rec$median_rec, units = "days")
+
+per_agency_category_rec$mean_recency_amount <-
+as.numeric(per_agency_category_rec$mean_recency_amount, units = "days")
+
+per_agency_category_rec$median_recency_amount <-
+as.numeric(per_agency_category_rec$median_recency_amount, units = "days")
+
+#add ratios to per_agency_category_rec
+per_agency_category_rec <- per_agency_category_rec %>%
+mutate(
+max_rec_ratio = max_rec / mean_recency_amount,
+mean_rec_ratio = mean_rec / mean_recency_amount,
+median_rec_ratio = median_rec / median_recency_amount,
+mean_rec_ratio  = count_rec / mean_count_recency
+) %>%
+select(
+-mean_recency_amount,
+-median_recency_amount,
+-mean_count_recency,-max_rec,
+-mean_rec,
+-median_rec,
+-count_rec
+) %>%
+top_n(-4)  # Use top_n(xx) to select the top xx rows, and top_n(-xx) for the bottom xx rows
+
+#remove INF from median_rec_ratio
+per_agency_category_rec <-
+per_agency_category_rec[is.finite(per_agency_category_rec$median_rec_ratio),]
+
+#create new DF, add MaxR to year_month column
+max_per_agency_categor_rec <- per_agency_category_rec %>%
+mutate(Year_Month = paste("MaxR", Year_Month, sep = "_")) %>%
+select(-mean_rec_ratio,-median_rec_ratio)
+
+#view head of max_per_agency_category_rec
+kable(head(max_per_agency_categor_rec)) %>% kable_styling(latex_options = "scale_down")
+
+#create new DF, add MedR to year_month column
+med_per_agency_category_rec <- per_agency_category_rec %>%
+mutate(Year_Month = paste("MedR", Year_Month, sep = "_")) %>%
+select(-mean_rec_ratio,-max_rec_ratio)
+
+#view head of med_per_agency_category_rec
+kable(head(med_per_agency_category_rec)) %>% kable_styling(latex_options = "scale_down")
+
+#create new DF, add MeanR to year_month column
+mean_per_agency_category_rec <- per_agency_category_rec %>%
+mutate(Year_Month = paste("MeanR", Year_Month, sep = "_")) %>%
+select(-median_rec_ratio,-max_rec_ratio)
+
+#view head of mean_per_agency_category_rec
+kable(head(mean_per_agency_category_rec)) %>% kable_styling(latex_options = "scale_down")
+
+#Max Recency variable: Use "dcast" in Library "reshape2" to organize the data 
+#so each row is a merchant category of an agent.
+max_wide_rec <-
+dcast(max_per_agency_categor_rec,
+Agency_Name + Merchant_Category ~ Year_Month)
+max_wide_rec = as.matrix(max_wide_rec)
+max_wide_rec[is.na(max_wide_rec)] <- 0
+max_wide_rec = as.data.frame(max_wide_rec)
+#view head
+kable(head(max_wide_rec)) %>% kable_styling(latex_options = "scale_down")
+
+# Median Recency variable: Use "dcast" in Library "reshape2" to organize the 
+#data so each row is a merchant category of an agent.
+med_wide_rec <-
+dcast(med_per_agency_category_rec,
+Agency_Name + Merchant_Category ~ Year_Month)
+med_wide_rec = as.matrix(med_wide_rec)
+med_wide_rec[is.na(med_wide_rec)] <- 0
+med_wide_rec = as.data.frame(med_wide_rec)
+#view head
+kable(head(med_wide_rec)) %>% kable_styling(latex_options = "scale_down")
+
+# Mean Recency variable: Use "dcast" in Library "reshape2" to organize the 
+#data so each row is a merchant category of an agent.
+mean_wide_rec <-
+dcast(mean_per_agency_category_rec,
+Agency_Name + Merchant_Category ~ Year_Month)
+mean_wide_rec = as.matrix(mean_wide_rec)
+mean_wide_rec[is.na(mean_wide_rec)] <- 0
+mean_wide_rec = as.data.frame(mean_wide_rec)
+#view head
+kable(head(mean_wide_rec)) %>% kable_styling(latex_options = "scale_down")
+
+#merge dataframes
+model_df_rec <-
+left_join(max_wide_rec,
+mean_wide_rec,
+by = c('Agency_Name', 'Merchant_Category'))
+model_df_rec <-
+merge(model_df_rec,
+med_wide_rec,
+by = c("Agency_Name", "Merchant_Category"))
+
+#merge recency and transaction amount dataframes
+model_df <-
+merge(model_df_amt,
+model_df_rec,
+by = c("Agency_Name", "Merchant_Category"))
+
+#View in excel, write to CSV
+#write_csv(model_df, "model_df.csv")
+
+#remove identifier columns
+#model_df$Agency_Name <- NULL
+#model_df$Merchant_Category <- NULL
+
+#change ratio columns to numeric
+cols = c(3:74)
+model_df[, cols] = apply(model_df[, cols], 2, function(x)
+as.numeric(as.character(x)))
+
+#scale data
+model_df_scale <- as.data.frame(scale(model_df[, cols]))
+
+#remove mean ratio calculations, use median as a feature instead as 
+#it is not impacted by outliers.
+to.remove <-
+c(
+"Mean_201307",
+"Mean_201308",
+"Mean_201309",
+"Mean_201310",
+"Mean_201311",
+"Mean_201312",
+"Mean_201401",
+"Mean_201402",
+"Mean_201403",
+"Mean_201404",
+"Mean_201405",
+"Mean_201406",
+"MeanR_201307",
+"MeanR_201308",
+"MeanR_201309",
+"MeanR_201310",
+"MeanR_201311",
+"MeanR_201312",
+"MeanR_201401",
+"MeanR_201402",
+"MeanR_201403",
+"MeanR_201404",
+"MeanR_201405",
+"MeanR_201406"
+)
+`%ni%` <- Negate(`%in%`)
+model_df_scale <-
+subset(model_df_scale, select = names(model_df_scale) %ni% to.remove)
+
+```
+
+#DBSCAN Modeling Technique
+##DBCAN Method
+DBSCAN is a density based clustering algorithm.  Unlike K-means, which makes round clusters, DBSCAN can handle clusters of various shapes and sizes. It is therefore able to find clusters that K-means is unable to discover. For fraud analysis, DBSCAN will group together points that are closely packed together and mark outlier points that lie outside these clusters.  These outlier points could be possible fraudulent transactions.
+
+##DBSCAN Model
+Hyperparameters tuned include:
+
+minPts - how many neighbors a point should have to be included into a cluster   
+
+eps (epsilon) - how close points should be to each other to be considered a part of a cluster   
+
+```{r}
+#load library
+library(dbscan)
+library(fpc)
+library(factoextra)
+library(rattle.data)
+
+#principal component anlaysis to reduce high-dimensional data to two dimensions
+fraud_PCA <- prcomp(model_df_scale)
+fraud_PCA2 <- fraud_PCA$x[, 1:2]
+
+#view head of ccard
+kable(head(fraud_PCA2))
+
+#Compute DBSCAN using fpc package
+#minPts
+#The rule of thumb for minPts is to use at least the number of dimensions of the data set plus one.
+#(source: https://cran.r-project.org/web/packages/dbscan/vignettes/dbscan.pdf)
+#In our case, this is 3.  However, I tested other MinPts as well.
+#I tested 3, 5, 20, 50 and 100.
+
+#eps
+#For eps, we can plot the points’ kNN distances (i.e., the distance to the kth nearest neighbor)
+#in decreasing order and look for a knee in the plot.
+#(source: https://cran.r-project.org/web/packages/dbscan/vignettes/dbscan.pdf)
+
+#minPts = 3
+kNNdistplot(model_df_scale, k = 3)
+abline(h = 12, col = "red", lty = 2) #EPS = 12
+
+#minPts = 5
+kNNdistplot(model_df_scale, k = 5)
+abline(h = 12, col = "red", lty = 2) #EPS = 12
+
+#minPts = 20
+kNNdistplot(model_df_scale, k = 20)
+abline(h = 15, col = "red", lty = 2) #EPS = 15
+
+#minPts = 50
+kNNdistplot(model_df_scale, k = 50)
+abline(h = 15, col = "red", lty = 2) #EPS = 15
+
+#minPts = 100
+kNNdistplot(model_df_scale, k = 100)
+abline(h = 15, col = "red", lty = 2) #EPS = 15
+
+#eps = 12, MinPts = 3
+set.seed(1)
+modl <- fpc::dbscan(model_df_scale, eps = 12, MinPts = 3)
+#view table
+modl #The clustering contains 3 clusters and 52 noise points.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = 12, MinPts = 3",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl$cluster
+)
+points(fraud_PCA2[modl$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl$cluster == 0,]
+
+#eps = 12, MinPts = 5
+set.seed(1)
+modl2 <- fpc::dbscan(model_df_scale, eps = 12, MinPts = 5)
+#view table
+modl2 #The clustering contains 2 clusters and 58 noise points.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = 12, MinPts = 5",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl2$cluster
+)
+points(fraud_PCA2[modl2$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl2$cluster == 0,]
+
+#eps = 15, MinPts = 20
+set.seed(1)
+modl2b <- fpc::dbscan(model_df_scale, eps = 15, MinPts = 20)
+#view table
+modl2b #The clustering contains 1 cluster and 44 noise points.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = 15, MinPts = 20",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl2b$cluster
+)
+points(fraud_PCA2[modl2b$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl2b$cluster == 0,]
+
+#eps = 15, MinPts = 50
+set.seed(1)
+modl3 <- fpc::dbscan(model_df_scale, eps = 15, MinPts = 50)
+#view table
+modl3 #The clustering contains 1 cluster and 46 noise points.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = 15, MinPts = 50",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl3$cluster
+)
+points(fraud_PCA2[modl3$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl3$cluster == 0,]
+
+#eps = 15, MinPts = 100
+set.seed(1)
+modl4 <- fpc::dbscan(model_df_scale, eps = 15, MinPts = 100)
+#view table
+modl4 #The clustering contains 1 cluster and 46 noise points.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = 15, MinPts = 100",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl4$cluster
+)
+points(fraud_PCA2[modl4$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl4$cluster == 0,]
+
+#I also tested smaller numbers for EPS - 0.01, 0.15, 0.5, 0.99, 2.0
+#eps = .01, MinPts = 50
+set.seed(1)
+modl5 <- fpc::dbscan(model_df_scale, eps = 0.01, MinPts = 50)
+#view table
+modl5 #The clustering contains 0 clusters and 5471 noise points, not useful.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = .01, MinPts = 50",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl5$cluster
+)
+points(fraud_PCA2[modl5$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl5$cluster == 0,]
+
+#eps = 0.15, MinPts = 50
+set.seed(1)
+modl6 <- fpc::dbscan(model_df_scale, eps = 0.15, MinPts = 50)
+#view table
+modl6 #The clustering contains 0 clusters and 5471 noise points, not useful.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = .15, MinPts = 50",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl6$cluster
+)
+points(fraud_PCA2[modl6$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl6$cluster == 0,]
+
+#eps = 0.5, MinPts = 50
+set.seed(1)
+modl7 <- fpc::dbscan(model_df_scale, eps = 0.5, MinPts = 50)
+#view table
+modl7 #The clustering contains 3 clusters and 5265 noise points, not useful.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = .5, MinPts = 50",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl7$cluster
+)
+points(fraud_PCA2[modl7$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl7$cluster == 0,]
+
+#eps = 0.99, MinPts = 50
+set.seed(1)
+modl8 <- fpc::dbscan(model_df_scale, eps = 0.99, MinPts = 50)
+#view table
+modl8 #The clustering contains 8 clusters and 4289 noise points, not useful.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = .5, MinPts = 50",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl8$cluster
+)
+points(fraud_PCA2[modl8$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl8$cluster == 0,]
+
+#eps = 2, MinPts = 50
+set.seed(1)
+modl9 <- fpc::dbscan(model_df_scale, eps = 2, MinPts = 50)
+#view table
+modl9 #The clustering contains 1 cluster1 and 2633 noise points, not useful.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters\neps = 2, MinPts = 50",
+sub = "Noise points plotted as crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red",
+col =
+modl9$cluster
+)
+points(fraud_PCA2[modl9$cluster == 0,], pch = 3, col = "red")
+noise <- model_df[modl9$cluster == 0,]
+
+```
+
+
+##Best Model with hyperparameters of MinPts=50 and eps=15
+It appears that using eps of 15 and MinPts of 50 resulted in a reasonable model.  It clustered the data points into 1 cluster with 46 outliers.
+```{r}
+modl3 #The clustering contains 1 cluster and 46 noise points.
+#plot clusters and add noise (cluster 0) as crosses.
+plot(fraud_PCA2, main = "Credit Card Transaction Clusters\neps = 15, MinPts = 50", sub = "Noise points plotted as crosses", cex.sub = 0.75, font.sub = 3, col.sub = "red", col =
+modl3$cluster)
+points(fraud_PCA2[modl3$cluster == 0, ], pch = 3, col = "red")
+noise <- model_df[modl3$cluster == 0, ]
+```
+
+##Anomalies
+```{r}
+#create DF that include possible fraud transactions
+fraud <- model_df[modl3$cluster == 0, ]
+fraud <- fraud[, 1:2]
+
+#view fraud
+kable(fraud) %>% kable_styling(latex_options = "scale_down")
+```
+
+##Business Insight
+Agency transactions that occurred within the merchant category listed in the fraud data frame could possibly be fraud based on my DBSCAN analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
+
+
+#MeanShift Modeling Technique
+##MeanShift Method
+The mean shift algorithm is a non parametric clustering technique. It can handle clusters of various shapes and sizes and prior knowledge of the number of clusters is not required. For each data point, mean shift defines a window around it and computes the mean of the data point. It then shifts the center of the window towards the mean and repeats the algorithm until it converges. For fraud analysis, data points far from the centroids can be ignored by the clustering process and flagged as anomalies. These anomaly points could be possible fraudulent transactions.
+
+##MeanShift Model
+Hyperparameter tuned include:
+h: a positive bandwidth parameter. Larger values of h produce few and large clusters. Smaller values of h produce many small clusters. 
+
+I analyzed h values of: 10, 20, 30, 50 and 75.
+
+```{r, cache=TRUE}
+#load library
+library(MeanShift)
+library(ggfortify)
+
+#view dimension of model_df_scale
+dim(model_df_scale)
+
+#transpose data
+model_df_trans <- t(model_df_scale)
+
+#view dimension of model_df_trans
+dim(model_df_trans)
+
+#view head of model_df_trans
+kable(head(model_df_trans))
+
+#H = 10.0
+#MeanShift clustering using multi-core processing
+options(mc.cores = 2)
+ms_clustering <-
+msClustering(model_df_trans, h = 10.0, multi.core = TRUE)
+
+#attach clustering labels to model df
+model_ms <- model_df
+model_ms[, 'ms_label'] <- ms_clustering[2]
+
+#change labels to factors
+model_ms[, 'ms_label'] <- as.factor(model_ms[, 'ms_label'])
+
+#view factor levels of ms_label column
+levels(model_ms$ms_label)
+
+#view number of occurances per factor level
+model_ms %>%
+group_by(ms_label) %>%
+summarise(no_rows = length(ms_label)) #cluster 1 has 5377 data points, cluster 2 has 3 data points,cluster 3 has 2 data points and clusters 4-85 have one point each.
+
+#plot using principal component anlaysis to reduce high-dimensional data to two dimensions
+autoplot(
+prcomp(model_ms[, 3:12], center = TRUE, scale. = TRUE),
+data = model_ms,
+colour = 'ms_label',
+frame = TRUE
+)
+
+#H = 20.0
+#MeanShift clustering using multi-core processing
+options(mc.cores = 2)
+ms_clustering <-
+msClustering(model_df_trans, h = 20.0, multi.core = TRUE)
+
+#attach clustering labels to model df
+model_ms <- model_df
+model_ms[, 'ms_label'] <- ms_clustering[2]
+
+#change labels to factors
+model_ms[, 'ms_label'] <- as.factor(model_ms[, 'ms_label'])
+
+#view factor levels of ms_label column
+levels(model_ms$ms_label)
+
+#view number of occurances per factor level
+model_ms %>%
+group_by(ms_label) %>%
+summarise(no_rows = length(ms_label)) #cluster 1 has 5449 data points, clusters 2-23 have one point each.
+
+#plot using principal component anlaysis to reduce high-dimensional data to two dimensions
+autoplot(
+prcomp(model_ms[, 3:12], center = TRUE, scale. = TRUE),
+data = model_ms,
+colour = 'ms_label',
+frame = TRUE
+)
+
+#H = 30.0
+#MeanShift clustering using multi-core processing
+options(mc.cores = 2)
+ms_clustering <-
+msClustering(model_df_trans, h = 30.0, multi.core = TRUE)
+
+#attach clustering labels to model df
+model_ms <- model_df
+model_ms[, 'ms_label'] <- ms_clustering[2]
+
+#change labels to factors
+model_ms[, 'ms_label'] <- as.factor(model_ms[, 'ms_label'])
+
+#view factor levels of ms_label column
+levels(model_ms$ms_label)
+
+#view number of occurances per factor level
+model_ms %>%
+group_by(ms_label) %>%
+summarise(no_rows = length(ms_label)) #cluster 1 has 5453 data points, 2-19 have one point each.
+
+#plot using principal component anlaysis to reduce high-dimensional data to two dimensions
+autoplot(
+prcomp(model_ms[, 3:12], center = TRUE, scale. = TRUE),
+data = model_ms,
+colour = 'ms_label',
+frame = TRUE
+)
+
+#H = 50.0
+#MeanShift clustering using multi-core processing
+options(mc.cores = 2)
+ms_clustering <-
+msClustering(model_df_trans, h = 50.0, multi.core = TRUE)
+
+#attach clustering labels to model df
+model_ms <- model_df
+model_ms[, 'ms_label'] <- ms_clustering[2]
+
+#change labels to factors
+model_ms[, 'ms_label'] <- as.factor(model_ms[, 'ms_label'])
+
+#view factor levels of ms_label column
+levels(model_ms$ms_label)
+
+#view number of occurances per factor level
+model_ms %>%
+group_by(ms_label) %>%
+summarise(no_rows = length(ms_label)) #cluster 1 has 5463 data points, 2-9 have one point each.
+
+#plot using principal component anlaysis to reduce high-dimensional data to two dimensions
+autoplot(
+prcomp(model_ms[, 3:12], center = TRUE, scale. = TRUE),
+data = model_ms,
+colour = 'ms_label',
+frame = TRUE
+)
+
+#H = 75.0
+#MeanShift clustering using multi-core processing
+options(mc.cores = 2)
+ms_clustering <-
+msClustering(model_df_trans, h = 75.0, multi.core = TRUE)
+
+#attach clustering labels to model df
+model_ms <- model_df
+model_ms[, 'ms_label'] <- ms_clustering[2]
+
+#change labels to factors
+model_ms[, 'ms_label'] <- as.factor(model_ms[, 'ms_label'])
+
+#view factor levels of ms_label column
+levels(model_ms$ms_label)
+
+#view number of occurances per factor level
+model_ms %>%
+group_by(ms_label) %>%
+summarise(no_rows = length(ms_label)) #cluster 1 has 5468 data points, 2-4 have one point each.
+
+#plot using principal component anlaysis to reduce high-dimensional data to two dimensions
+autoplot(
+prcomp(model_ms[, 3:12], center = TRUE, scale. = TRUE),
+data = model_ms,
+colour = 'ms_label',
+frame = TRUE
+)
+
+```
+
+##Best Model with hyperparameter of h=20
+It appears that using h of 20 resulted in a reasonable model.  It clustered the data points into 1 primary cluster with 22 anomalies.
+```{r, cache=TRUE}
+#H = 20.0
+#MeanShift clustering using multi-core processing
+options(mc.cores = 2)
+ms_clustering <-
+msClustering(model_df_trans, h = 20.0, multi.core = TRUE)
+
+#attach clustering labels to model df
+model_ms <- model_df
+model_ms[, 'Cluster'] <- ms_clustering[2]
+
+#change labels to factors
+model_ms[, 'Cluster'] <- as.factor(model_ms[, 'Cluster'])
+
+#view factor levels of ms_label column
+levels(model_ms$Cluster)
+
+#view number of occurances per factor level
+model_ms %>%
+group_by(Cluster) %>%
+summarise(no_rows = length(Cluster)) #cluster 1 has 5449 data points, clusters 2-23 have one point each.
+
+#principal component anlaysis to reduce high-dimensional data to two dimensions
+fraud_PCA <- prcomp(model_ms[, 3:12], center = TRUE, scale. = TRUE)
+fraud_PCA2 <- fraud_PCA$x[, 1:2]
+
+#plot cluster 1 add anomalies as crosses.
+plot(
+fraud_PCA2,
+main = "Credit Card Transaction Clusters",
+sub = "Anomalies plotted as circles with red crosses",
+cex.sub = 0.75,
+font.sub = 3,
+col.sub = "red"
+)
+points(fraud_PCA2[model_ms$Cluster != 1, ], pch = 4, col = "red")
+
+```
+
+
+##Anomalies
+```{r}
+#create DF that include possible fraud transactions
+fraud <- model_df[model_ms$Cluster != 1,]
+fraud <- fraud[, 1:2]
+
+#view fraud
+kable(fraud) %>% kable_styling(latex_options = "scale_down")
+```
+
+##Business Insight
+Agency transactions that occurred within the merchant category listed in the fraud data frame could possibly be fraud based on my MeanShift analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
+Grand River Dam Auth had the highest number of merchant categories, 4, that might contain fraudulent transactions.  
+```{r, fig.width=10,fig.height=11}
+#Plot number of merchant categories that contain
+#possible fraudulent transaactions by agency
+ggplot(data = fraud, mapping = aes(Agency_Name)) + geom_bar(fill = 'blue', stat = "count") + xlab("Agency Name") + ylab("Number of Merchant Categories \nContaining Possible Fraudulent Transactions") + ggtitle("Possible Fraudulent Transactions") + coord_flip()
+
+```
+
+#Autoencoder Modeling Technique
+##Autoencoder Method
+Autoencoder is an unsupervised, neural network algorithm that uses backpropagation, setting the target values equal to the inputs. Autoencoders compress the input into a latent-space representation, and then reconstructs the output from this representation. It is typically used for dimension reduction. 
+
+##Autoencoder Model
+Hyperparameters tuned:
+Hidden layers: 5, 2, 5 and 10, 2, 10
+Epochs: 50, 100, 200
+```{r, cache=TRUE}
+#load libraries
+library(h2o)
+library(dplyr)
+library(ggplot2)
+h2o.init()
+
+# convert data to H2OFrame
+model_h <- as.h2o(model_df_scale)
+
+#view head of h20 model
+kable(head(model_h))
+
+#splitting the dataset into training and test sets
+model_train_test <- h2o.splitFrame(model_h,
+ratios = c(0.4, 0.4), # must add up to less than 1.0
+seed = 42)
+
+train  <- model_train_test[[1]]
+test1  <- model_train_test[[2]]
+test2  <- model_train_test[[3]]
+dim(train)
+dim(test1)
+dim(test2)
+
+#set features
+x_col <- colnames(model_df_scale)
+
+#Hyperparameters: hidden= 5,2,5 epochs = 100
+#unsupervised neural network model using deep learning autoencoders (autoencoder = TRUE)
+#“bottleneck” training, hidden layer in the middle is very small. Model will reduce the dimensionality of the input data (in this case, down to 2 nodes/dimensions).
+model <- h2o.deeplearning(
+x = x_col,
+training_frame = train,
+model_id = "model",
+autoencoder = TRUE,
+hidden = c(5, 2, 5),
+epochs = 100,
+activation = "Tanh"
+)
+
+#view model details
+model
+
+#Test1
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test1_col <-
+h2o.deepfeatures(model, test1, layer = 2) %>% as.data.frame()
+ggplot(test1_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see outliers based on the graph
+#use anomaly detection function
+
+#anomaly detection
+anomaly <- h2o.anomaly(model, test1) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly df
+anomaly <- anomaly %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 1.647652e+25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier <-
+anomaly[which(anomaly[, 2] > 1.647652e+25), ] #row 1659 looks to be an anomaly
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier, colour =
+"red") +
+geom_text(data = outlier,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions row 1659 of test1 is equal to row 4165 of the model_df
+fraud_auto <- model_df[4165, ]
+
+#Test2
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test2_col <-
+h2o.deepfeatures(model, test2, layer = 2) %>% as.data.frame()
+ggplot(test2_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point()
+
+#anomaly detection
+anomaly2 <- h2o.anomaly(model, test2) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly2 %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #0.007633034
+
+#plot
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly2 df
+anomaly2 <- anomaly2 %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 0.25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier2 <-
+anomaly2[which(anomaly2[, 2] > 0.25), ] #4 possible anomalies
+
+#plot, possibly anomaly points are colored red
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier2, colour =
+"red") + geom_text(data = outlier2,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions
+#row 532 of test2 is equal to row 2687 of the model_df
+#row 537 of test2 is equal to row 2713 of the model_df
+#row 589 of test2 is equal to row 573 of the model_df
+#row 937 of test2 is equal to row 4752 of the model_df
+fraud_auto2 <- model_df[c(2687, 2713, 573, 4752), ]
+fraud_auto <- rbind(fraud_auto, fraud_auto2)
+
+#Hyperparameters: hidden= 10,2,10 epochs = 100
+model <- h2o.deeplearning(
+x = x_col,
+training_frame = train,
+model_id = "model",
+autoencoder = TRUE,
+hidden = c(10, 2, 10),
+epochs = 100,
+activation = "Tanh"
+)
+
+#view model details
+model
+
+#Test1
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test1_col <-
+h2o.deepfeatures(model, test1, layer = 2) %>% as.data.frame()
+ggplot(test1_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see which points are outliers, use anomaly detection
+
+#anomaly detection
+anomaly <- h2o.anomaly(model, test1) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #1.647652e+25
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly df
+anomaly <- anomaly %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 1.647652e+25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier <-
+anomaly[which(anomaly[, 2] > 1.647652e+25), ] #again row 1659 looks to be an anomaly
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier, colour =
+"red") +
+geom_text(data = outlier,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions row 1659 of test1 is equal to row 4165 of the model_df
+fraud_auto3 <- model_df[4165, ]
+
+#Test2
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test2_col <-
+h2o.deepfeatures(model, test2, layer = 2) %>% as.data.frame()
+ggplot(test2_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point()  #difficult to see outliers, use anomaly detection function
+
+#anomaly detection
+anomaly2 <- h2o.anomaly(model, test2) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly2 %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #0.007471474
+
+#plot
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly2 df
+anomaly2 <- anomaly2 %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 0.25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier2 <-
+anomaly2[which(anomaly2[, 2] > 0.25), ] #again, 4 possible anomalies
+
+#plot, possibly anomaly points are colored red
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier2, colour =
+"red") + geom_text(data = outlier2,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions
+#row 532 of test2 is equal to row 2687 of the model_df
+#row 537 of test2 is equal to row 2713 of the model_df
+#row 589 of test2 is equal to row 573 of the model_df
+#row 937 of test2 is equal to row 4752 of the model_df
+fraud_auto4 <- model_df[c(2687, 2713, 573, 4752), ]
+fraud_auto3 <- rbind(fraud_auto3, fraud_auto4)
+
+#Hyperparameters: hidden= 5,2,5 epochs = 50
+model <- h2o.deeplearning(
+x = x_col,
+training_frame = train,
+model_id = "model",
+autoencoder = TRUE,
+hidden = c(5, 2, 5),
+epochs = 50,
+activation = "Tanh"
+)
+
+#view model details
+model
+
+#Test1
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test1_col <-
+h2o.deepfeatures(model, test1, layer = 2) %>% as.data.frame()
+ggplot(test1_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see outliers, use anomaly detection function
+
+#anomaly detection
+anomaly <- h2o.anomaly(model, test1) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #1.647652e+25
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly df
+anomaly <- anomaly %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 1.647652e+25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier <-
+anomaly[which(anomaly[, 2] > 1.647652e+25), ] #row 1659 looks to be an anomaly
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier, colour =
+"red") +
+geom_text(data = outlier,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions row 1659 of test1 is equal to row 4165 of the model_df
+fraud_auto5 <- model_df[4165, ]
+
+#Test2
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test2_col <-
+h2o.deepfeatures(model, test2, layer = 2) %>% as.data.frame()
+ggplot(test2_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see outliers, use anomaly function
+
+#anomaly detection
+anomaly2 <- h2o.anomaly(model, test2) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly2 %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #0.007654928
+
+#plot
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly2 df
+anomaly2 <- anomaly2 %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 0.25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier2 <-
+anomaly2[which(anomaly2[, 2] > 0.25), ] #4 possible anomalies
+
+#plot, possibly anomaly points are colored red
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier2, colour =
+"red") + geom_text(data = outlier2,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions
+#row 532 of test2 is equal to row 2687 of the model_df
+#row 537 of test2 is equal to row 2713 of the model_df
+#row 589 of test2 is equal to row 573 of the model_df
+#row 937 of test2 is equal to row 4752 of the model_df
+fraud_auto6 <- model_df[c(2687, 2713, 573, 4752), ]
+fraud_auto5 <- rbind(fraud_auto5, fraud_auto5)
+
+#Hyperparameters: hidden= 10,2,10 epochs = 50
+model <- h2o.deeplearning(
+x = x_col,
+training_frame = train,
+model_id = "model",
+autoencoder = TRUE,
+hidden = c(10, 2, 10),
+epochs = 50,
+activation = "Tanh"
+)
+
+#view model details
+model
+
+#Test1
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test1_col <-
+h2o.deepfeatures(model, test1, layer = 2) %>% as.data.frame()
+ggplot(test1_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see outliers, use anomaly function
+
+#anomaly detection
+anomaly <- h2o.anomaly(model, test1) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #1.647652e+25
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly df
+anomaly <- anomaly %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 1.647652e+25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier <-
+anomaly[which(anomaly[, 2] > 1.647652e+25), ] #row 1659 looks to be an anomaly
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier, colour =
+"red") +
+geom_text(data = outlier,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions row 1659 of test1 is equal to row 4165 of the model_df
+fraud_auto7 <- model_df[4165, ]
+
+#Test2
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test2_col <-
+h2o.deepfeatures(model, test2, layer = 2) %>% as.data.frame()
+ggplot(test2_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see outliers, use anomaly function
+
+#anomaly detection
+anomaly2 <- h2o.anomaly(model, test2) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly2 %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #0.007580477
+
+#plot
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly2 df
+anomaly2 <- anomaly2 %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 0.25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier2 <-
+anomaly2[which(anomaly2[, 2] > 0.25), ] #4 possible anomalies
+
+#plot, possibly anomaly points are colored red
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier2, colour =
+"red") + geom_text(data = outlier2,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions
+#row 532 of test2 is equal to row 2687 of the model_df
+#row 537 of test2 is equal to row 2713 of the model_df
+#row 589 of test2 is equal to row 573 of the model_df
+#row 937 of test2 is equal to row 4752 of the model_df
+fraud_auto8 <- model_df[c(2687, 2713, 573, 4752), ]
+fraud_auto7 <- rbind(fraud_auto7, fraud_auto8)
+
+#Hyperparameters: hidden= 5,2,5 epochs = 200
+model <- h2o.deeplearning(
+x = x_col,
+training_frame = train,
+model_id = "model",
+autoencoder = TRUE,
+hidden = c(5, 2, 5),
+epochs = 200,
+activation = "Tanh"
+)
+
+#view model details
+model
+
+#Test1
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test1_col <-
+h2o.deepfeatures(model, test1, layer = 2) %>% as.data.frame()
+ggplot(test1_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #hard to see outliers, use anomaly detection
+
+#anomaly detection
+anomaly <- h2o.anomaly(model, test1) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #1.647652e+25
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly df
+anomaly <- anomaly %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 1.647652e+25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier <-
+anomaly[which(anomaly[, 2] > 1.647652e+25), ] #row 1659 looks to be an anomaly
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier, colour =
+"red") +
+geom_text(data = outlier,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions row 1659 of test1 is equal to row 4165 of the model_df
+fraud_auto9 <- model_df[4165, ]
+
+#Test2
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test2_col <-
+h2o.deepfeatures(model, test2, layer = 2) %>% as.data.frame()
+ggplot(test2_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see outliers, use anomaly detection function
+
+#anomaly detection
+anomaly2 <- h2o.anomaly(model, test2) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly2 %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #0.007565647
+
+#plot
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly2 df
+anomaly2 <- anomaly2 %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 0.25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier2 <-
+anomaly2[which(anomaly2[, 2] > 0.25), ] #4 possible anomalies
+
+#plot, possibly anomaly points are colored red
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier2, colour =
+"red") + geom_text(data = outlier2,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions
+#row 532 of test2 is equal to row 2687 of the model_df
+#row 537 of test2 is equal to row 2713 of the model_df
+#row 589 of test2 is equal to row 573 of the model_df
+#row 937 of test2 is equal to row 4752 of the model_df
+fraud_auto10 <- model_df[c(2687, 2713, 573, 4752), ]
+fraud_auto9 <- rbind(fraud_auto9, fraud_auto10)
+
+#Hyperparameters: hidden= 10,2,10 epochs = 200
+#unsupervised neural network model using deep learning autoencoders (autoencoder = TRUE)
+#“bottleneck” training, hidden layer in the middle is very small. Model will reduce the dimensionality of the input data (in this case, down to 2 nodes/dimensions).
+model <- h2o.deeplearning(
+x = x_col,
+training_frame = train,
+model_id = "model",
+autoencoder = TRUE,
+hidden = c(10, 2, 10),
+epochs = 200,
+activation = "Tanh"
+)
+
+#view model details
+model
+
+#Test1
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test1_col <-
+h2o.deepfeatures(model, test1, layer = 2) %>% as.data.frame()
+ggplot(test1_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see outliers, use anomaly detection function
+
+#anomaly detection
+anomaly <- h2o.anomaly(model, test1) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #1.647652e+25
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly df
+anomaly <- anomaly %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 1.647652e+25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier <-
+anomaly[which(anomaly[, 2] > 1.647652e+25), ] #row 1659 looks to be an anomaly
+
+#plot
+ggplot(anomaly, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier, colour =
+"red") +
+geom_text(data = outlier,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions row 1659 of test1 is equal to row 4165 of the model_df
+fraud_auto11 <- model_df[4165, ]
+
+#Test2
+#dimensionality reduction to explore feature space
+#extract this hidden feature and plot it to show the reduced #representation of the input data.
+test2_col <-
+h2o.deepfeatures(model, test2, layer = 2) %>% as.data.frame()
+ggplot(test2_col, aes(x = DF.L2.C1, y = DF.L2.C2)) +
+geom_point() #difficult to see outliers, use anomaly detection function
+
+#anomaly detection
+anomaly2 <- h2o.anomaly(model, test2) %>%
+as.data.frame() %>%
+tibble::rownames_to_column()
+
+mean_mse <- anomaly2 %>%
+summarise(mean = mean(Reconstruction.MSE))
+mean_mse #0.007465285
+
+#plot
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1")
+
+#add outlier vs no outlier to anomaly2 df
+anomaly2 <- anomaly2 %>%
+mutate(outlier = ifelse(Reconstruction.MSE > 0.25, "outlier", "no_outlier"))
+
+#subset which rows greater than mean mse
+outlier2 <-
+anomaly2[which(anomaly2[, 2] > 0.25), ] #4 possible anomalies
+
+#plot, possibly anomaly points are colored red
+ggplot(anomaly2, aes(x = as.numeric(rowname), y = Reconstruction.MSE)) +
+geom_point(alpha = 0.3) +
+geom_hline(data = mean_mse, aes(yintercept = mean)) +
+scale_color_brewer(palette = "Set1") +
+labs(x = "Row Number", y = "Reconstruction MSE") + geom_point(data = outlier2, colour =
+"red") + geom_text(data = outlier2,
+label = "Anomaly",
+vjust = 1)
+
+#create DF that include possible fraud transactions
+#row 532 of test2 is equal to row 2687 of the model_df
+#row 537 of test2 is equal to row 2713 of the model_df
+#row 589 of test2 is equal to row 573 of the model_df
+#row 937 of test2 is equal to row 4752 of the model_df
+fraud_auto12 <- model_df[c(2687, 2713, 573, 4752), ]
+fraud_auto11 <- rbind(fraud_auto11, fraud_auto12)
+```
+
+##Anomalies
+```{r}
+#all versions of tuned hyperparameters resulted in the same outliers
+#view fraud_auto dataframe
+kable(fraud_auto) %>% kable_styling(latex_options = "scale_down")
+```
+
+##Business Insight
+Agency transactions that occurred within the merchant category listed in the fraud_auto data frame could possibly be fraud based on my Autoencoder analysis.  Transactions that occurred within these merchant categories at these agencies require further analysis to determine if fraud actually occurred. 
+
+Of the five agency transactions flagged as possible anomalies using Autoencoder, all but one was also flagged with my MeanShift model.  The one data point that was flagged by Autoencoder but not MeanShift was the Holiday Inns category of the Department of Agriculture. 
+
+Overall, I found using Autoencoder more challenging for anomaly detection than MeanShift as the model did not cluster data points.  
+ 
+```{r, fig.width=10,fig.height=11}
+#Plot number of merchant categories that contain
+#possible fraudulent transaactions by agency
+ggplot(data = fraud_auto, mapping = aes(Agency_Name)) + geom_bar(fill = 'blue', stat = "count") + xlab("Agency Name") + ylab("Number of Merchant Categories \nContaining Possible Fraudulent Transactions") + ggtitle("Possible Fraudulent Transactions") + coord_flip()
+
+```
