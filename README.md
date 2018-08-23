@@ -93,6 +93,17 @@ Of the five agency transactions flagged as possible anomalies using Autoencoder,
 
 Overall, I found using Autoencoder more challenging for anomaly detection than MeanShift as the model did not cluster data points. 
 
+# Dataset
+## Credit Card Fraud Detection
+[Anonymized credit card transactions](https://www.kaggle.com/mlg-ulb/creditcardfraud) labeled as fraudulent or genuine 
+
+## Overview
+This dataset is comprised of 284,807 observations and 31 columns. The variables consist of:
+- Time - (numeric) Number of seconds elapsed between this transaction and the first transaction in the dataset
+- V1 through V28 - (numeric) Features V1 through V28 are the principal components obtained with PCA
+- Amount - (numeric) Transaction amount
+- Class - (integer) 1 for fraudulent transactions, 0 otherwise
+
 # Random Forest Modeling Technique
 ## Random Forest Method
 The random forest classifier is a supervised learning technique. The model creates a set of decision trees from randomly selected subsets of the training set, it then aggregates the votes from different decision trees to decide the final class of the test object 
