@@ -15,3 +15,5 @@ This dataset is comprised of 442,458 observations and 11 columns. The variables 
 - Transaction Date
 - Posted Date
 - Merchant Category Code (MCC)
+# Feature Creation
+## Monetary Feature
