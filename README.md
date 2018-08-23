@@ -25,11 +25,7 @@ Add: Max, Average and Median Amount Ratio Features by Agency Name and Merchant C
 Recency(time since last transaction)
 
 Add: Max, Average and Median Recency Ratio Features by Agency Name and Merchant Category
-
-| First Header  | Second Header |
-| ------------- | ------------- |
-| Content Cell  | Content Cell  |
-| Content Cell  | Content Cell  |
+![](figs/Picture3.png)
 
 
 # DBSCAN Modeling Technique
