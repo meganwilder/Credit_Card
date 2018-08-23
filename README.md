@@ -41,6 +41,7 @@ eps (epsilon) - how close points should be to each other to be considered a part
 
 ## Best Model with Hyperparameters of MinPts=50 and eps=15
 It appears that using eps of 15 and MinPts of 50 resulted in a reasonable model.  It clustered the data points into 1 cluster with 46 outliers.
+![](figs/Picture4.png)
 
 ## Anomalies
 
