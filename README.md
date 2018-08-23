@@ -139,14 +139,24 @@ Down-Sampling for the Majority Class: Fraud transactions (the positive class) re
 
 Results: Out of all the models with varying number of trees and maximum tree depths, I choose the model with the highest AUC on the validation set as the best model. This model used 50 trees and had a max depth of 15. I then evaluated the model performance on my test set.
 
-The test set performance metrics at the threshold that maximizes the F-statistic:
-LogLoss: 0.02584733
-AUC: 0.9709288
-Gini: 0.9418577
-Precision: 0.762
-Recall: 0.811
-F1: 0.786
+The test set performance metrics at the threshold that maximizes the F-statistic:  
+
+LogLoss: 0.02584733  
+
+AUC: 0.9709288  
+
+Gini: 0.9418577  
+
+Precision: 0.762  
+
+Recall: 0.811  
+
+F1: 0.786  
 
 I used the above metrics to determine my model’s performance. As my dataset was imbalanced I primarily used Precision, Recall and the F-score to evaluate my model performance. All of which indicate that the model is good.
+
+![](figs/Picture9.png)
+
+![](figs/Picture10.png)
 
 In a business use case a credit card company would prefer more false positives than false negatives. That is the company would rather incorrectly identify a transaction as fraud than identify a fraudulent transaction as legitimate. Therefore, for my performance metrics I preferred high Recall, which is a low false negative rate rather than high Precision, which is a low false positive rate.
