@@ -1,0 +1,379 @@
+---
+title: "APAN5420 --- HW 9, Credit Card Transactions"
+author: 'Megan Wilder'
+date: "7/28/18"
+output:
+  pdf_document: 
+    number_sections: yes
+    toc: yes
+    toc_depth: 1
+  html_document: 
+    df_print: default
+    number_sections: yes
+    toc: no
+    toc_depth: 1
+---
+
+-----
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+
+```{r, include=FALSE}
+#load libraries
+library(kableExtra)
+library(knitr)
+library(caret)
+library(pROC)
+library(dplyr)
+library(h2o)
+library(ROSE)
+library(ggplot2)
+
+#load data
+ccard <- read.csv("creditcard.csv")
+
+#explore dataframe
+dim(ccard)
+summary(ccard)
+lapply(ccard, class)
+#view table of class variable
+table(ccard$Class)
+#view percentage of fraud transactions
+prop.table(table(ccard$Class)) * 100  #0.173%, imbalanced dataset
+
+#graph Class variable
+ggplot(data = ccard, aes(x = Class)) + geom_bar()
+
+#columns overview
+#Time - (numeric) Number of seconds elapsed between this transaction and
+#the first transaction in the dataset
+#V1 through V28 - (numeric) Features V1 through V28 are the principal components
+#obtained with PCA
+#Amount - (numeric) Transaction amount
+#Class - (integer) 1 for fraudulent transactions, 0 otherwise
+
+#change Class variable to categorical from numerical to categorical variable
+ccard$Class <- factor(ccard$Class)
+
+```
+
+#Down-Sampling for the Majority Class
+Fraud transactions (the positive class) represent 0.173% of the data set, resulting in a highly imbalanced data set.  Were I to run my model on the data set as is, it would bias the prediction model towards the more common non-fraudulent class. It is therefore necessary to balance the data set.  I choose to use down-sampling, which creates a more balanced data set by selecting a random sample from the majority class. After down-sampling, fraud transactions represent 10% of the training data set. 
+(source: http://www.simafore.com/blog/handling-unbalanced-data-machine-learning-models).
+
+```{r}
+#split dataset into training and test sets
+#set seed
+set.seed(123)
+
+# Sample into 3 sets. 60% train, 20% validation and 20% test
+idx <-
+sample(
+seq(1, 3),
+size = nrow(ccard),
+replace = TRUE,
+prob = c(.6, .2, .2)
+)
+train <- ccard[idx == 1, ]
+test <- ccard[idx == 2, ]
+val <- ccard[idx == 3, ]
+
+#check classes distribution
+kable(prop.table(table(train$Class)))
+kable(prop.table(table(test$Class)))
+kable(prop.table(table(val$Class)))
+
+#down-sampling, sample so that fraud represents about 10% of data set
+#a typical range for resampling is to make fraud 5-20% of the training set.
+#want to make it a significant amount of the training set but not 
+#amplyify the noise too much.
+data_balanced_under <-
+ovun.sample(
+Class ~ .,
+data = train,
+method = "under",
+p = 0.1,
+seed = 1
+)$data
+
+#view table of class variable in rebalanced training set
+kable(table(data_balanced_under$Class))
+#view classes distribution in rebalanced training set
+kable(prop.table(table(data_balanced_under$Class)))
+
+```
+
+```{r, results="hide"}
+#Start H2O
+h2o.init(nthreads = -1, max_mem_size = '8G')
+
+# clean slate in case the cluster was already running
+h2o.removeAll()
+
+```
+
+#Random Forest
+Random Forest technique: The random forest classifier is a supervised learning technique.  The model creates a set of decision trees from randomly selected subsets of the training set, it then aggregates the votes from different decision trees to decide the final class of the test object (source: https://medium.com/machine-learning-101/chapter-5-random-forest-classifier-56dc7425c3e1).
+
+
+```{r}
+# make h2o data.frame, loads into H2O service
+train.hex <- as.h2o(data_balanced_under)
+test.hex <- as.h2o(test)
+val.hex <- as.h2o(val)
+
+# Summary
+#summary(train.hex, exact_quantiles = TRUE)
+#summary(test.hex, exact_quantiles = TRUE)
+#summary(val.hex, exact_quantiles = TRUE)
+
+# Response and predictors to use
+resp <- "Class"
+pred <- setdiff(names(train.hex), 'Class')
+
+# train model
+rf.1 = h2o.randomForest(
+x = pred,
+y = resp,
+training_frame = train.hex,
+validation_frame = val.hex,
+model_id = "rf.1",
+ntrees = 200,
+## use a maximum of 200 trees to create the
+##  random forest model. Will let
+##  the early stopping criteria decide when
+##  the random forest is sufficiently accurate
+max_depth = 30,
+stopping_rounds = 2,
+## Stop fitting new trees when the 2-tree
+##  average is within 0.001 (default) of
+##  the prior two 2-tree averages.
+##  Can be thought of as a convergence setting
+stopping_tolerance = 1e-2,
+score_each_iteration = T,
+seed = 123 ## Set the random seed so that this can be reproduced
+)
+
+## Get the AUC on the test set
+h2o.auc(h2o.performance(rf.1, newdata = test.hex)) #0.9435885 AUC
+
+# predict response variable
+rf.pred = h2o.predict(object = rf.1, newdata = test.hex)
+```
+
+#Tune Hyperparameters
+Hyperparameters:  
+ntrees = Number of trees. I used 200, 500, 1000, 1500, 2000.   
+max_depth = Maximum tree depth. I used 5, 10, 15, 20, 25, 30.  
+  
+Grid Search: I used H2o's grid search to train and validate numerous models at once based on different hyper-parameter levels.   
+
+Performance Metrics: In order to evaluate the performance of a model on a given data set, it is necessary to measure how well the model's predictions actually match the observed data.  
+
+MSE = Mean squared error, it measures the square of the errors.  The MSE will be small if the predicted responses are very close to the true responses, and it will be large if the predicted and true responses differ substantially. MSE is vulnerable to outliers and is in a different scale than the measured units. Used in regression (continuous output).  
+
+RMSE = Root mean squared error. It is the square root of the average of squared differences between prediction and actual observation (MSE).  Lower values are better. It is scale dependent, therefore if the scales of the dependent variables differ across models, you can't compare RMSEs. Used in regression (continuous output).  
+
+Log Loss = Logarithmic loss measures the performance of a classification model where the prediction input is a probability value between 0 and 1. Lower values are better. "Log Loss takes into account the uncertainty of your prediction based on how much it varies from the actual label. This gives us a more nuanced view into the performance of our model."  
+
+AUC = The overall performance of a classifier, summarized
+over all possible thresholds, is given by the area under the (ROC)
+curve (AUC). It is used in classification analysis to determine which model predicted the classes best. It is typically used with binary classification.  Not very useful for imbalanced data as it doesn’t place more emphasis on one class over the other (i.e. it does not reflect the minority class well). 
+
+Gini = The Gini coefficient can be used to evaluate the performance of a classifier.  It is the ratio between area between the ROC curve and the diagonal line and the area of the above triangle (Gini = 2*AUC – 1). Gini above 60% is viewed as a good model.  
+
+Precision =  Measures that fraction of examples classified as positive that are truly positive (i.e. when the model predicts positive, how often is it correct?)
+
+Recall = True positive rate (i.e. when it's actually positive, how often does it predict positive?). 
+
+F1 = Measure of a model's accuracy.  It's the harmonic average of  precision and recall, where an F1 score reaches its best value at 1 (perfect precision and recall) and worst at 0.  
+
+(sources: 
+https://cran.r-project.org/web/packages/zFactor/vignettes/statistics.html http://wiki.fast.ai/index.php/Log_Loss  
+https://stats.stackexchange.com/questions/132777/what-does-auc-stand-for-and-what-is-it  
+https://www.analyticsvidhya.com/blog/2016/02/7-important-model-evaluation-error-metrics/  
+https://en.wikipedia.org/wiki/F1_score 
+https://www.biostat.wisc.edu/~page/rocpr.pdf
+)
+```{r}
+#create list of hyperparameters to tune
+hyper_params = list(ntrees = seq(500, 2000, 500),
+max_depth = seq(5, 30, 5))
+
+#Cartesian Grid Search
+grid <- h2o.grid(
+hyper_params = hyper_params,
+search_criteria = list(strategy = "Cartesian"),
+algorithm = "randomForest",
+grid_id = "rf_grid",
+x = pred,
+y = resp,
+training_frame = train.hex,
+validation_frame = val.hex,
+seed = 123,
+stopping_rounds = 2,
+stopping_tolerance = 1e-2,
+stopping_metric = "AUC",
+score_tree_interval = 10
+)
+#view grid
+grid
+
+## sort the grid models by decreasing AUC
+sortedGrid <-
+h2o.getGrid("rf_grid", sort_by = "auc", decreasing = TRUE)
+print(sortedGrid)
+
+#print AUC for 10 best models
+for (i in 1:10) {
+topModels <- h2o.getModel(sortedGrid@model_ids[[i]])
+print(h2o.auc(h2o.performance(topModels, valid = TRUE)))
+}
+
+#name model with highest AUC best model
+best_model <-
+h2o.getModel(sortedGrid@model_ids[[1]]) #better than my original model, which had an AUC of 0.94358853
+
+#view best model
+summary(best_model)
+
+#get the actual number of trees
+ntrees <- best_model@model$model_summary$number_of_trees
+ntrees
+
+#get the actual max depth
+mdepth <- best_model@model$model_summary$max_depth
+mdepth
+
+
+#Validation set used to select the best model
+#Evaluate the model performance on test set to get honest estimate of model performance
+best_model_perf <- h2o.performance(model = best_model,
+newdata = test.hex)
+
+#model performance metrics on test set
+best_model_perf
+#MSE
+h2o.mse(best_model_perf) #0.003808079, not really relevant for classification problems
+#RMSE
+h2o.rmse(best_model_perf) #0.06170964, not really relevant for classification problems
+#Log Loss
+h2o.logloss(best_model_perf) #0.02584733
+#AUC
+h2o.auc(best_model_perf)  #0.9709288, slighly less than the AUC on the validation set
+#Gini
+h2o.giniCoef(best_model_perf) #0.9418577
+
+#best model performance metrics at all thresholds
+test.scores <- best_model_perf@metrics$thresholds_and_metric_scores
+
+#find best threshold that maximizes F1
+best.thresh <- test.scores$threshold[which.max(test.scores$f1)]
+
+#create dataframe with performance metrics of model on test data at
+#threshold that maximizes F1
+metrics <- data_frame(
+Precision = h2o.precision(best_model_perf, best.thresh),
+Recall = h2o.recall(best_model_perf, best.thresh),
+F1 = h2o.F1(best_model_perf, best.thresh),
+AUC = h2o.auc(best_model_perf),
+LogLoss = h2o.logloss(best_model_perf),
+Gini = h2o.giniCoef(best_model_perf),
+Accuracy = h2o.accuracy(best_model_perf, best.thresh),
+Mean_Accuracy = h2o.mean_per_class_accuracy(best_model_perf, best.thresh)
+)
+
+#view metrics
+kable(metrics) %>%
+kable_styling(bootstrap_options = "striped", full_width = F)
+#overall it appears that my model performed well
+
+
+```
+Results:  Out of all the models with varying number of trees and maximum tree depths, I choose the model with the highest AUC on the validation set as the best model.   This model used 50 trees and had a max depth of 15. I then evaluated the model performance on my test set.   
+
+The test set performance metrics at the threshold that maximizes the F-statistic:  
+LogLoss:  0.02584733  
+AUC:  0.9709288  
+Gini:  0.9418577  
+Precision: 0.762  
+Recall: 0.811  
+F1: 0.786  
+
+I used the above metrics to determine my model’s performance.  As my dataset was imbalanced I primarily used Precision, Recall and the F-score to evaluate my model performance.  All of which indicate that the model is good.  
+
+In a business use case a credit card company would prefer more false positives than false negatives. That is the company would rather incorrectly identify a transaction as fraud than identify a fraudulent transaction as legitimate.  Therefore, for my performance metrics I preferred high Recall, which is a low false negative rate rather than high Precision, which is a low false positive rate.  
+
+
+#Plot Performance Metrics
+```{r}
+#scoring history of train and validation set
+scoring_history <- as.data.frame(best_model@model$scoring_history)
+
+#LogLoss
+plot(best_model,
+timestep = "number_of_trees",
+metric = "logloss")
+
+#AUC
+plot(best_model,
+timestep = "number_of_trees",
+metric = "AUC")
+
+#Classification Error
+plot(best_model,
+timestep = "number_of_trees",
+metric = "classification_error")
+
+#ROC
+tpr = as.data.frame(h2o.tpr(best_model_perf))
+fpr = as.data.frame(h2o.fpr(best_model_perf))
+ROC_out <- merge(tpr, fpr, by = 'threshold')
+head(ROC_out)
+
+#Plot ROC
+ggplot(ROC_out, aes(x = fpr, y = tpr)) +
+theme_bw() +
+geom_line() +
+ggtitle("ROC") + ylab("TPR") + xlab("FPR")
+#ROC curves plot the tradeoff between recall and false positive rates
+
+#Precision Recall
+#Evaluate the predictive performance of model based on precision and recall
+head(h2o.F1(best_model_perf))
+precision = as.data.frame(h2o.precision(best_model_perf))
+recall = as.data.frame(h2o.recall(best_model_perf))
+PR_out <- merge(precision, recall, by = 'threshold')
+head(PR_out)
+
+#Plot Precision - Recall
+ggplot(PR_out, aes(x = tpr, y = precision)) +
+theme_bw() +
+geom_line() +
+ggtitle("Precision-Recall") + ylab("Precision") + xlab("Recall")
+#Precision-recall curves shows the tradeoff between precision and recall
+#for different thresholds. Useful measure of prediction success when
+#modeling rare events (classes very imbalanced).
+#High precision relates to a low false positive rate,
+#and high recall relates to a low false negative rate. High scores
+#for both show that the classifier is returning accurate results
+#(high precision), as well as returning a majority of all 
+#positive results (high recall).
+#(source: http://scikit-learn.org/stable/auto_examples/model_selection/plot_precision_recall.html)
+
+#plot threshold that maximizes F1
+ggplot(test.scores, aes(x = threshold, y = f1)) +
+geom_line() +
+geom_point() +
+geom_vline(xintercept = best.thresh,
+linetype = "dashed",
+color = "red") +
+labs(x = "Prob. Cutoff", y = "F1-Measure")
+
+# All done. Shut down H2O.
+h2o.shutdown(prompt = FALSE)
+```
+
